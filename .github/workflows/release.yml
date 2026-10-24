@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Unit tests
+        run: swift test
+
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          swift build -c release -Xswiftc -warnings-as-errors
+          bin="$(swift build -c release --show-bin-path)/agentmode"
+          version="$("$bin" --version)"
+          if [ "$version" != "agentmode ${TAG#v}" ]; then
+            echo "tag $TAG does not match '$version' (AgentModeVersion.current)" >&2
+            exit 1
+          fi
+          lipo -archs "$bin"
+          codesign -dv "$bin"
+          name="agentmode-${TAG}-macos-arm64"
+          mkdir -p "dist/$name"
+          install -m 0755 "$bin" "dist/$name/agentmode"
+          cp README.md README.es.md LICENSE CHANGELOG.md scripts/setup-privileges.sh "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          cp scripts/install.sh dist/install.sh
+          (cd dist && shasum -a 256 "$name.tar.gz" install.sh > SHA256SUMS)
+
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz
+
+      - name: Publish (draft, upload, then publish)
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --draft --verify-tag --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/*.tar.gz dist/install.sh dist/SHA256SUMS
+          gh release edit "$TAG" --draft=false

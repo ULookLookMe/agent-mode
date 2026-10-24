@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-test:
+    name: build-test (${{ matrix.toolchain }})
+    # Preview image with macOS 27 and Xcode 27 (Swift 6.4), the only hosted runner that can build a
+    # macOS 27 package today. Switch to the GA macOS 27 label once runner-images announces it.
+    runs-on: xcode-27
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolchain: clt
+            developer_dir: /Library/Developer/CommandLineTools
+          - toolchain: xcode
+            developer_dir: /Applications/Xcode_27.app/Contents/Developer
+    env:
+      DEVELOPER_DIR: ${{ matrix.developer_dir }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: swift --version && xcrun --show-sdk-version
+
+      - name: Format
+        run: swift format lint --strict --recursive Sources scripts Package.swift
+
+      - name: Build (warnings as errors)
+        run: swift build -c release -Xswiftc -warnings-as-errors
+
+      - name: Unit tests
+        run: swift test
+
+      - name: Smoke test (dry run, changes nothing on the runner)
+        run: |
+          set -euo pipefail
+          export AGENTMODE_DRY_RUN=1 AGENTMODE_STATE_DIR="$RUNNER_TEMP/agentmode-state"
+          mkdir -p "$AGENTMODE_STATE_DIR" "$RUNNER_TEMP/bin"
+          install -m 0755 "$(swift build -c release --show-bin-path)/agentmode" "$RUNNER_TEMP/bin/agentmode"
+          bin="$RUNNER_TEMP/bin/agentmode"
+          "$bin" --version
+          "$bin" help
+          "$bin" status
+          "$bin" status --json | python3 -c 'import json, sys; assert json.load(sys.stdin)["schemaVersion"] == 1'
+          "$bin" on
+          "$bin" off
+          "$bin" toggle
+          "$bin" toggle
+          "$bin" daemon > "$RUNNER_TEMP/daemon.log" 2>&1 &
+          daemon_pid=$!
+          sleep 5
+          status_text="$("$bin" status)"
+          grep -q "Daemon: running" <<< "$status_text"
+          kill "$daemon_pid"
+          wait "$daemon_pid" || true
+          grep -q "restoring sleep" "$RUNNER_TEMP/daemon.log"
+          "$bin" install
+          grep -q "<string>$bin</string>" "$AGENTMODE_STATE_DIR/com.jsanchez.agentmode.plist"
+          "$bin" uninstall
+          set +e
+          "$bin" bogus
+          test $? -eq 64

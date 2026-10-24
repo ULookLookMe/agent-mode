@@ -1,0 +1,45 @@
+name: Bug report
+description: Something agentmode does wrong or does not do.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If the Mac stays awake when it should not, run `sudo pmset -a disablesleep 0`
+        first to restore normal sleep. For a security problem, use the Security tab instead of an issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: agentmode version
+      description: Output of `agentmode --version`.
+      placeholder: agentmode 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model and macOS version
+      description: Apple menu > About This Mac.
+      placeholder: MacBook Air (M3, 2024), macOS 27.1
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of `agentmode status`
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant log lines
+      description: From `~/Library/Logs/agentmode.log`, around the time of the problem.
+      render: text
